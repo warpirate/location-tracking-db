@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Location Tracker Database</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .subtitle {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            font-size: 1.2em;
+            color: #666;
+        }
+
+        .error {
+            background: #fee;
+            color: #c00;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #c00;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.9em;
+            letter-spacing: 0.5px;
+        }
+
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            color: #333;
+        }
+
+        tr:hover {
+            background: #f8f9ff;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            opacity: 0.9;
+            font-size: 0.9em;
+        }
+
+        .refresh-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1em;
+            margin: 20px 0;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .coordinates {
+            font-family: 'Courier New', monospace;
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+
+        .timestamp {
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📍 Location Tracker</h1>
+            <p class="subtitle">Real-time location data from Supabase</p>
+        </header>
+        
+        <div class="content">
+            <div id="loading" class="loading">Loading location data...</div>
+            <div id="error" class="error" style="display: none;"></div>
+            
+            <div id="stats" class="stats" style="display: none;">
+                <div class="stat-card">
+                    <div class="stat-number" id="total-records">0</div>
+                    <div class="stat-label">Total Records</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="unique-users">0</div>
+                    <div class="stat-label">Unique Users</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="latest-update">-</div>
+                    <div class="stat-label">Latest Update</div>
+                </div>
+            </div>
+            
+            <button class="refresh-btn" onclick="loadData()" style="display: none;" id="refresh-btn">
+                🔄 Refresh Data
+            </button>
+            
+            <div id="data-container"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        let supabase;
+        
+        async function initializeSupabase() {
+            try {
+                // Direct configuration for static website
+                const supabaseUrl = 'https://eflkitdxlifnobgelrvu.supabase.co';
+                const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVmbGtpdGR4bGlmbm9iZ2VscnZ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMyMTU0NzQsImV4cCI6MjA3ODc5MTQ3NH0.m6Rr8hi874fD9nhRXrgIOC85sceKh5RhCiKt94yxKFU';
+                
+                if (!supabaseUrl || !supabaseAnonKey) {
+                    throw new Error('Supabase credentials not configured');
+                }
+                
+                supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+                return true;
+            } catch (error) {
+                showError('Failed to initialize Supabase: ' + error.message);
+                return false;
+            }
+        }
+        
+        async function loadData() {
+            if (!supabase) {
+                const initialized = await initializeSupabase();
+                if (!initialized) return;
+            }
+            
+            try {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('error').style.display = 'none';
+                document.getElementById('data-container').innerHTML = '';
+                
+                const { data, error } = await supabase
+                    .from('locations')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+                
+                if (error) throw error;
+                
+                displayData(data);
+                updateStats(data);
+                
+            } catch (error) {
+                showError('Error loading data: ' + error.message);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('refresh-btn').style.display = 'inline-block';
+            }
+        }
+        
+        function displayData(data) {
+            if (!data || data.length === 0) {
+                document.getElementById('data-container').innerHTML = '<p style="text-align: center; padding: 50px; color: #666;">No location data found</p>';
+                return;
+            }
+            
+            const table = document.createElement('table');
+            table.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>User ID</th>
+                        <th>Coordinates</th>
+                        <th>Accuracy</th>
+                        <th>Altitude</th>
+                        <th>Timestamp</th>
+                        <th>Created At</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${data.map(row => `
+                        <tr>
+                            <td>${row.id}</td>
+                            <td>${row.user_id || '-'}</td>
+                            <td>
+                                <span class="coordinates">
+                                    📍 ${row.latitude?.toFixed(6) || 'N/A'}, ${row.longitude?.toFixed(6) || 'N/A'}
+                                </span>
+                            </td>
+                            <td>${row.accuracy ? row.accuracy.toFixed(2) + 'm' : '-'}</td>
+                            <td>${row.altitude ? row.altitude.toFixed(2) + 'm' : '-'}</td>
+                            <td><span class="timestamp">${formatTimestamp(row.timestamp)}</span></td>
+                            <td><span class="timestamp">${formatTimestamp(row.created_at)}</span></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            `;
+            
+            document.getElementById('data-container').appendChild(table);
+            document.getElementById('stats').style.display = 'grid';
+        }
+        
+        function updateStats(data) {
+            if (!data) return;
+            
+            document.getElementById('total-records').textContent = data.length;
+            
+            const uniqueUsers = [...new Set(data.map(row => row.user_id).filter(Boolean))];
+            document.getElementById('unique-users').textContent = uniqueUsers.length;
+            
+            if (data.length > 0) {
+                const latestTimestamp = data[0].created_at;
+                document.getElementById('latest-update').textContent = formatTimeAgo(latestTimestamp);
+            }
+        }
+        
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '-';
+            return new Date(timestamp).toLocaleString();
+        }
+        
+        function formatTimeAgo(timestamp) {
+            const now = new Date();
+            const past = new Date(timestamp);
+            const diffMs = now - past;
+            const diffMins = Math.floor(diffMs / 60000);
+            
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            
+            const diffHours = Math.floor(diffMins / 60);
+            if (diffHours < 24) return `${diffHours}h ago`;
+            
+            const diffDays = Math.floor(diffHours / 24);
+            return `${diffDays}d ago`;
+        }
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            document.getElementById('loading').style.display = 'none';
+        }
+        
+        // Load data when page loads
+        window.addEventListener('load', loadData);
+        
+        // Auto-refresh every 30 seconds
+        setInterval(loadData, 30000);
+    </script>
+</body>
+</html>
