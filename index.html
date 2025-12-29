@@ -192,8 +192,9 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script>
+    <script type="module">
+        import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+        
         let supabase;
         
         async function initializeSupabase() {
@@ -206,7 +207,7 @@
                     throw new Error('Supabase credentials not configured');
                 }
                 
-                supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+                supabase = createClient(supabaseUrl, supabaseAnonKey);
                 return true;
             } catch (error) {
                 showError('Failed to initialize Supabase: ' + error.message);
@@ -268,9 +269,32 @@
                             <td>${row.id}</td>
                             <td>${row.user_id || '-'}</td>
                             <td>
-                                <span class="coordinates">
-                                    📍 ${row.latitude?.toFixed(6) || 'N/A'}, ${row.longitude?.toFixed(6) || 'N/A'}
-                                </span>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span class="coordinates">
+                                        📍 ${row.latitude?.toFixed(6) || 'N/A'}, ${row.longitude?.toFixed(6) || 'N/A'}
+                                    </span>
+                                    ${row.latitude && row.longitude ? `
+                                        <button 
+                                            onclick="window.open('https://www.google.com/maps?q=${row.latitude},${row.longitude}', '_blank')"
+                                            style="
+                                                background: #4285f4;
+                                                color: white;
+                                                border: none;
+                                                padding: 4px 8px;
+                                                border-radius: 4px;
+                                                cursor: pointer;
+                                                font-size: 12px;
+                                                text-decoration: none;
+                                                display: inline-flex;
+                                                align-items: center;
+                                                gap: 4px;
+                                            "
+                                            title="Open in Google Maps"
+                                        >
+                                            🗺️ Maps
+                                        </button>
+                                    ` : ''}
+                                </div>
                             </td>
                             <td>${row.accuracy ? row.accuracy.toFixed(2) + 'm' : '-'}</td>
                             <td>${row.altitude ? row.altitude.toFixed(2) + 'm' : '-'}</td>
@@ -332,6 +356,9 @@
         
         // Auto-refresh every 30 seconds
         setInterval(loadData, 30000);
+        
+        // Make functions globally available for onclick handlers
+        window.loadData = loadData;
     </script>
 </body>
 </html>
