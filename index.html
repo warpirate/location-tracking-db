@@ -196,6 +196,7 @@
         import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
         
         let supabase;
+        let realtimeSubscription = null;
         
         async function initializeSupabase() {
             try {
@@ -215,21 +216,78 @@
             }
         }
         
+        function setupRealtimeSubscription() {
+            if (!supabase) {
+                console.warn('Cannot setup real-time: Supabase not initialized');
+                return;
+            }
+            
+            if (realtimeSubscription) {
+                console.log('Real-time subscription already exists');
+                return;
+            }
+            
+            // Subscribe to INSERT, UPDATE, and DELETE events
+            realtimeSubscription = supabase
+                .channel('locations-changes')
+                .on('postgres_changes', 
+                    { 
+                        event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
+                        schema: 'public',
+                        table: 'locations'
+                    }, 
+                    (payload) => {
+                        console.log('🔔 Real-time update received:', payload.eventType, payload);
+                        // Show a brief visual indicator
+                        const refreshBtn = document.getElementById('refresh-btn');
+                        if (refreshBtn) {
+                            const originalText = refreshBtn.textContent;
+                            refreshBtn.textContent = '🔄 Updating...';
+                            refreshBtn.style.opacity = '0.7';
+                            setTimeout(() => {
+                                refreshBtn.textContent = originalText;
+                                refreshBtn.style.opacity = '1';
+                            }, 1000);
+                        }
+                        // Reload data when any change occurs
+                        loadData();
+                    }
+                )
+                .subscribe((status) => {
+                    console.log('📡 Realtime subscription status:', status);
+                    if (status === 'SUBSCRIBED') {
+                        console.log('✅ Real-time updates enabled - Dashboard will auto-refresh on changes');
+                    } else if (status === 'CHANNEL_ERROR') {
+                        console.error('❌ Real-time subscription error - Falling back to 30s polling');
+                    } else if (status === 'TIMED_OUT') {
+                        console.warn('⏱️ Real-time subscription timed out - Falling back to 30s polling');
+                    } else if (status === 'CLOSED') {
+                        console.warn('🔒 Real-time subscription closed');
+                    }
+                });
+        }
+        
         async function loadData() {
             if (!supabase) {
                 const initialized = await initializeSupabase();
                 if (!initialized) return;
+                
+                // Setup real-time subscription after initialization
+                setupRealtimeSubscription();
             }
             
             try {
-                document.getElementById('loading').style.display = 'block';
+                // Only show loading on initial load, not on real-time updates
+                const isInitialLoad = document.getElementById('data-container').innerHTML === '';
+                if (isInitialLoad) {
+                    document.getElementById('loading').style.display = 'block';
+                }
                 document.getElementById('error').style.display = 'none';
-                document.getElementById('data-container').innerHTML = '';
                 
                 const { data, error } = await supabase
                     .from('locations')
                     .select('*')
-                    .order('created_at', { ascending: false });
+                    .order('last_updated', { ascending: false });
                 
                 if (error) throw error;
                 
@@ -238,6 +296,7 @@
                 
             } catch (error) {
                 showError('Error loading data: ' + error.message);
+                console.error('Load data error:', error);
             } finally {
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('refresh-btn').style.display = 'inline-block';
@@ -249,6 +308,17 @@
                 document.getElementById('data-container').innerHTML = '<p style="text-align: center; padding: 50px; color: #666;">No location data found</p>';
                 return;
             }
+            
+            // Handle both lowercase and capitalized column names (PostgreSQL is case-sensitive for quoted columns)
+            // Also handle numeric strings from database
+            const getLatitude = (row) => {
+                const val = row.latitude ?? row.Latitude ?? null;
+                return val !== null ? parseFloat(val) : null;
+            };
+            const getLongitude = (row) => {
+                const val = row.longitude ?? row.Longitude ?? null;
+                return val !== null ? parseFloat(val) : null;
+            };
             
             const table = document.createElement('table');
             table.innerHTML = `
@@ -264,18 +334,21 @@
                     </tr>
                 </thead>
                 <tbody>
-                    ${data.map(row => `
+                    ${data.map(row => {
+                        const lat = getLatitude(row);
+                        const lng = getLongitude(row);
+                        return `
                         <tr>
                             <td>${row.id}</td>
                             <td>${row.user_id || '-'}</td>
                             <td>
                                 <div style="display: flex; align-items: center; gap: 8px;">
                                     <span class="coordinates">
-                                        📍 ${row.latitude?.toFixed(6) || 'N/A'}, ${row.longitude?.toFixed(6) || 'N/A'}
+                                        📍 ${lat !== null ? lat.toFixed(6) : 'N/A'}, ${lng !== null ? lng.toFixed(6) : 'N/A'}
                                     </span>
-                                    ${row.latitude && row.longitude ? `
+                                    ${lat !== null && lng !== null ? `
                                         <button 
-                                            onclick="window.open('https://www.google.com/maps?q=${row.latitude},${row.longitude}', '_blank')"
+                                            onclick="window.open('https://www.google.com/maps?q=${lat},${lng}', '_blank')"
                                             style="
                                                 background: #4285f4;
                                                 color: white;
@@ -296,15 +369,17 @@
                                     ` : ''}
                                 </div>
                             </td>
-                            <td>${row.accuracy ? row.accuracy.toFixed(2) + 'm' : '-'}</td>
-                            <td>${row.altitude ? row.altitude.toFixed(2) + 'm' : '-'}</td>
+                            <td>${row.accuracy ? parseFloat(row.accuracy).toFixed(2) + 'm' : '-'}</td>
+                            <td>${row.altitude ? parseFloat(row.altitude).toFixed(2) + 'm' : '-'}</td>
                             <td><span class="timestamp">${formatTimestamp(row.timestamp)}</span></td>
                             <td><span class="timestamp">${formatTimestamp(row.created_at)}</span></td>
                         </tr>
-                    `).join('')}
+                    `;
+                    }).join('')}
                 </tbody>
             `;
             
+            document.getElementById('data-container').innerHTML = '';
             document.getElementById('data-container').appendChild(table);
             document.getElementById('stats').style.display = 'grid';
         }
@@ -318,7 +393,8 @@
             document.getElementById('unique-users').textContent = uniqueUsers.length;
             
             if (data.length > 0) {
-                const latestTimestamp = data[0].created_at;
+                // Use last_updated if available, otherwise fall back to created_at
+                const latestTimestamp = data[0].last_updated || data[0].created_at;
                 document.getElementById('latest-update').textContent = formatTimeAgo(latestTimestamp);
             }
         }
@@ -352,10 +428,21 @@
         }
         
         // Load data when page loads
-        window.addEventListener('load', loadData);
+        window.addEventListener('load', async () => {
+            await loadData();
+            // Setup real-time subscription after initial load
+            setupRealtimeSubscription();
+        });
         
-        // Auto-refresh every 30 seconds
+        // Auto-refresh every 30 seconds as backup (real-time should handle most updates)
         setInterval(loadData, 30000);
+        
+        // Cleanup subscription on page unload
+        window.addEventListener('beforeunload', () => {
+            if (realtimeSubscription) {
+                supabase.removeChannel(realtimeSubscription);
+            }
+        });
         
         // Make functions globally available for onclick handlers
         window.loadData = loadData;
